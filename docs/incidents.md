@@ -145,14 +145,23 @@ and `NumpyVectorStore` otherwise, with nothing overwriting it afterward.
 Every finding in incidents #1-4 came from code that runs without
 network access — pure Python, numpy, scikit-learn. Incident #5
 confirms `SentenceTransformerEmbedder` and `CrossEncoderReranker`
-genuinely work, deployed and tested live. Incident #7 corrects an
-overstatement: `FaissVectorStore` specifically was not actually
-exercised until that bug was found and fixed — worth re-deploying and
-re-confirming the live query test now that the real backend is
-genuinely in the loop, rather than assuming the fix works without
-checking. JWT authentication (matching Log Anomaly Detection
-Platform's exact proven pattern) has now been added in response to
-incident #6, closing that specific gap — though, consistent with every
-other unverified-until-deployed component in this project, it hasn't
-been confirmed working live yet either. Persistence (the other half of
-incident #6) remains open.
+genuinely work, deployed and tested live. Incident #7's fix has now
+been **confirmed live**, not just fixed in code: the same adversarial
+semantic-retrieval test (zero shared vocabulary between query and
+document) was re-run after removing the stray line, and correctly
+surfaced the right document — this time genuinely through
+`FaissVectorStore`. JWT authentication (incident #6's fix) is also
+**confirmed live**: an unauthenticated `POST /ingest` now correctly
+returns `401 {"detail":"Not authenticated"}`, and the full
+token → ingest → query flow works end to end with a real bearer token.
+The `bcrypt==4.0.1` pin, applied proactively from Log Anomaly Detection
+Platform's incident #3, correctly prevented that exact crash from
+recurring here.
+
+**What remains genuinely open**: persistence (the other half of
+incident #6) — the in-memory index still won't survive a Space
+restart, matching Log Anomaly Detection Platform's own still-open
+incident #11. Everything else this project set out to demonstrate —
+hybrid retrieval, real semantic embeddings, reranking, retrieval
+evaluation, and now authentication — is verified working, live,
+end to end.

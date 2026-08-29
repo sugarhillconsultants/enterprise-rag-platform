@@ -10,20 +10,24 @@ Framed around this portfolio's recurring security-analyst use case: a
 knowledge base of security policy documents and incident reports,
 queryable in natural language.
 
-## Status: fully verified, including the real embedding/reranking path — live and deployed
+## Status: fully verified end to end — real models, hybrid retrieval, and auth all confirmed live
 
 Every algorithmic component was verified locally first (20/20 tests,
 including three genuine findings — see
-[`docs/incidents.md`](docs/incidents.md) #1-4). Then this project was
-deployed to a live Hugging Face Space with `USE_REAL_MODELS=true`,
-giving the real `sentence-transformers` embedding model and cross-encoder
-reranker their first actual execution. **Confirmed working**: a query
-sharing zero exact vocabulary with its matching document ("how often
-should credentials be refreshed" vs. "Rotate IAM access keys every 90
-days...") was correctly retrieved — genuine proof of real semantic
-understanding, not keyword luck. The live deployment also surfaced two
-real, honestly-documented limitations within hours (no persistence, no
-auth on `/ingest`) — see incidents #5 and #6.
+[`docs/incidents.md`](docs/incidents.md) #1-4). Deployed to a live
+Hugging Face Space, this project then confirmed, live: real semantic
+embeddings correctly retrieving a document sharing zero exact
+vocabulary with the query (#5); a real bug where `FaissVectorStore`
+was silently never used, found and fixed, then **re-confirmed live**
+after the fix (#7); and JWT authentication (reusing
+[Log Anomaly Detection Platform](https://github.com/sugarhillconsultants/log-anomaly-platform)'s
+exact proven pattern, including a proactive fix for that project's
+known `bcrypt` incompatibility) closing a real gap that an unknown
+third party had already exploited within hours of first deploy (#6).
+The one remaining open item: persistence — the in-memory index still
+won't survive a Space restart, the same architectural gap
+[documented](https://github.com/sugarhillconsultants/log-anomaly-platform/blob/main/docs/incidents.md)
+(and not yet closed) in that same companion project.
 
 ## What's actually in this repo
 
@@ -76,13 +80,11 @@ curl -X POST http://localhost:7860/eval \
 
 ## What I'd add next (the real, prioritized list)
 
-1. **Add persistence and JWT auth on `/ingest`** — no longer theoretical:
-   incident #6 shows a real Space restart wiped the in-memory index,
-   and a real, unauthenticated third party actually used the open
-   `/ingest` endpoint within hours of deploy. Both fixes already have a
-   proven pattern to follow from
-   [Log Anomaly Detection Platform](https://github.com/sugarhillconsultants/log-anomaly-platform)
-   (async SQLAlchemy + JWT via `OAuth2PasswordBearer`).
+1. **Add persistence** — the single remaining open item. The in-memory
+   document index doesn't survive a Space restart (confirmed live in
+   incident #6), the same architectural gap Log Anomaly Detection
+   Platform still has open too. JWT auth (the other half of that
+   incident) is now fixed and confirmed live.
 2. Run the real-embeddings-vs-TF-IDF evaluation comparison (`POST
    /eval` against both backends on the same query set) and document
    the actual numbers — the qualitative proof already exists (incident
