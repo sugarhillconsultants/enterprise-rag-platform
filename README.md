@@ -10,13 +10,15 @@ Framed around this portfolio's recurring security-analyst use case: a
 knowledge base of security policy documents and incident reports,
 queryable in natural language.
 
-## Status: core logic fully verified, production embedding path unverified — stated honestly
+## Status: core logic fully verified (twice) — production embedding path unverified, stated honestly
 
 This project was built with no network access available in
 development. Every algorithmic component (BM25, vector similarity,
 hybrid fusion, chunking, evaluation metrics, reranking mechanics) is
-implemented, tested, and verified — **20/20 tests passing**, including
-three genuine findings discovered while writing those tests (see
+implemented, tested, and verified — **20/20 tests confirmed passing
+both manually during development and under real `pytest` in GitHub
+Actions CI on the first push** — including three genuine findings
+discovered while writing those tests (see
 [`docs/incidents.md`](docs/incidents.md)). The real semantic embedding
 model and cross-encoder reranker are written correctly against their
 libraries' documented APIs but have **not** been executed, since that
@@ -35,7 +37,7 @@ breakdown: [`docs/architecture.md`](docs/architecture.md).
 | `ingestion/chunker.py` | Sentence-aware document chunking with overlap | **Yes** — confirmed zero data loss despite a documented packing-efficiency quirk |
 | `ingestion/embeddings.py` | TF-IDF (verified stand-in) + sentence-transformer (real, unverified) | TF-IDF: **yes**. Sentence-transformer: correct code, unverified |
 | `app/main.py` | FastAPI service tying it all together | Endpoint logic verified directly (FastAPI itself not installed in dev environment) |
-| `tests/test_pipeline.py` | Formal test suite — 20 tests, all passing | **Yes** — run manually (pytest unavailable in dev sandbox) |
+| `tests/test_pipeline.py` | Formal test suite — 20 tests | **Yes, twice over**: manually verified during development (pytest unavailable in that sandbox), then confirmed passing under real `pytest` in GitHub Actions CI on first push |
 | `docs/architecture.md` | The full honest verified/unverified breakdown | — |
 | `docs/incidents.md` | 4 real findings from building and testing this project | — |
 
