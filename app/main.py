@@ -14,7 +14,8 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -25,6 +26,7 @@ from retrieval.vector_store import NumpyVectorStore, FaissVectorStore
 from retrieval.hybrid import hybrid_search
 from retrieval.reranker import MockReranker, CrossEncoderReranker
 from eval.metrics import evaluate_retrieval
+from app.auth import authenticate_user, create_access_token, get_current_user, Token
 
 USE_REAL_MODELS = os.environ.get("USE_REAL_MODELS", "false").lower() == "true"
 EMBEDDING_DIM = 384  # all-MiniLM-L6-v2's output dimension, only used when USE_REAL_MODELS=true
@@ -59,7 +61,7 @@ def _rebuild_indexes():
         _embedder = TfidfEmbedder().fit(texts)
         vectors = _embedder.embed(texts)
         _vector_store = NumpyVectorStore()
-    _vector_store = NumpyVectorStore()
+
     _vector_store.add(vectors, ids=chunk_ids)
     _bm25 = BM25().fit(texts)
 
@@ -114,8 +116,17 @@ def health():
     return {"status": "healthy"}
 
 
+@app.post("/token", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    access_token = create_access_token(data={"sub": user["username"]})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 @app.post("/ingest", response_model=IngestResponse, status_code=201)
-def ingest(payload: IngestRequest):
+def ingest(payload: IngestRequest, current_user: str = Depends(get_current_user)):
     chunks = chunk_document(payload.text, source_id=payload.source_id)
     for chunk in chunks:
         chunk_id = f"{chunk.source_id}::{chunk.chunk_index}"
@@ -125,8 +136,11 @@ def ingest(payload: IngestRequest):
     return IngestResponse(source_id=payload.source_id, chunks_created=len(chunks))
 
 
-@app.post("/query", response_model=QueryResponse)
-def query(payload: QueryRequest):
+def _do_query(payload: QueryRequest) -> QueryResponse:
+    """The actual retrieval logic, extracted from the /query endpoint
+    so /eval can call it directly as a plain function without going
+    through FastAPI's dependency injection (which only resolves
+    Depends() for real HTTP requests, not direct Python calls)."""
     if not _documents or _vector_store is None or _bm25 is None:
         raise HTTPException(status_code=400, detail="No documents ingested yet — call /ingest first")
 
@@ -151,6 +165,11 @@ def query(payload: QueryRequest):
     )
 
 
+@app.post("/query", response_model=QueryResponse)
+def query(payload: QueryRequest, current_user: str = Depends(get_current_user)):
+    return _do_query(payload)
+
+
 class EvalRequest(BaseModel):
     queries: list[str]
     relevant_chunk_ids: list[list[str]]  # ground truth per query
@@ -158,13 +177,13 @@ class EvalRequest(BaseModel):
 
 
 @app.post("/eval")
-def run_eval(payload: EvalRequest):
+def run_eval(payload: EvalRequest, current_user: str = Depends(get_current_user)):
     if len(payload.queries) != len(payload.relevant_chunk_ids):
         raise HTTPException(status_code=400, detail="queries and relevant_chunk_ids must be the same length")
 
     all_retrieved = []
     for q in payload.queries:
-        result = query(QueryRequest(query=q, top_k=max(payload.k_values)))
+        result = _do_query(QueryRequest(query=q, top_k=max(payload.k_values)))
         all_retrieved.append([r.chunk_id for r in result.results])
 
     all_relevant = [set(ids) for ids in payload.relevant_chunk_ids]

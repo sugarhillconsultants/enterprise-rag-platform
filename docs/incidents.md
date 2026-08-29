@@ -116,15 +116,43 @@ hypothetical risk description; it's a live demonstration of the exact
 gap this project's own README already flagged as missing, now with
 concrete evidence of real, unsolicited external use.
 
+## 7. A real bug found by re-reading the file, not by a live failure: FaissVectorStore was silently never used
+
+While adding JWT auth and reviewing `main.py` end to end before this
+deploy, `_rebuild_indexes()` contained a stray line:
+`_vector_store = NumpyVectorStore()` sitting **after**, not inside, the
+`if USE_REAL_MODELS / else` block — meaning it unconditionally
+overwrote whatever the branch above had just assigned. The practical
+effect: **`FaissVectorStore` was never actually used**, even on the
+live Space with `USE_REAL_MODELS=true` — every search silently ran
+through `NumpyVectorStore` regardless of the flag.
+
+This doesn't invalidate incident #5's core finding — `SentenceTransformerEmbedder`
+genuinely ran and produced the correct embeddings, and `NumpyVectorStore`'s
+brute-force cosine similarity is exactly-correct math (already
+independently verified in this project's own test suite), so the
+semantic retrieval result reported in #5 was still numerically accurate.
+What it does mean: the specific claim "FaissVectorStore confirmed
+working live" was never actually true, despite the code appearing to
+wire it in — worth being precise about the difference between "the
+search results were correct" and "the intended backend class was the
+one that produced them." Fixed by removing the stray line; the branch
+now correctly constructs `FaissVectorStore` when `USE_REAL_MODELS=true`
+and `NumpyVectorStore` otherwise, with nothing overwriting it afterward.
+
 ## What's confirmed, and what's still genuinely open
 
 Every finding in incidents #1-4 came from code that runs without
 network access — pure Python, numpy, scikit-learn. Incident #5
-confirms the real embedding/reranking path (`sentence-transformers`,
-`faiss-cpu`, a cross-encoder) genuinely works, deployed and tested live
-— this is no longer an open gap. What remains, per incident #6: this
-service needs a persistence layer (matching the fix already identified
-for Log Anomaly Detection Platform) and JWT authentication on `/ingest`
-at minimum (matching the pattern already proven in that same project)
-before it should be considered production-shaped rather than a working
-demonstration of the retrieval pipeline itself.
+confirms `SentenceTransformerEmbedder` and `CrossEncoderReranker`
+genuinely work, deployed and tested live. Incident #7 corrects an
+overstatement: `FaissVectorStore` specifically was not actually
+exercised until that bug was found and fixed — worth re-deploying and
+re-confirming the live query test now that the real backend is
+genuinely in the loop, rather than assuming the fix works without
+checking. JWT authentication (matching Log Anomaly Detection
+Platform's exact proven pattern) has now been added in response to
+incident #6, closing that specific gap — though, consistent with every
+other unverified-until-deployed component in this project, it hasn't
+been confirmed working live yet either. Persistence (the other half of
+incident #6) remains open.
