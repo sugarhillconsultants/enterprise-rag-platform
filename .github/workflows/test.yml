@@ -15,3 +15,30 @@ jobs:
           python-version: "3.11"
       - run: pip install numpy scikit-learn pytest
       - run: pytest tests/ -v
+
+  deploy-huggingface-space:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push to Hugging Face Space (Dockerfile + README at root, code in subfolders)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install huggingface_hub
+          python -c "
+          from huggingface_hub import HfApi
+          api = HfApi(token='${HF_TOKEN}')
+          repo_id = '${{ vars.HF_SPACE_ID }}'
+          commit_msg = 'Deploy ${{ github.sha }}'
+
+          # Dockerfile and the Spaces front-matter README must live at
+          # the Space's ROOT — the Dockerfile's COPY commands expect
+          # app/, ingestion/, retrieval/, eval/ as sibling folders at
+          # that same root, exactly matching this repo's own layout.
+          api.upload_file(path_or_fileobj='Dockerfile', path_in_repo='Dockerfile', repo_id=repo_id, repo_type='space', commit_message=commit_msg)
+          api.upload_file(path_or_fileobj='app/README.md', path_in_repo='README.md', repo_id=repo_id, repo_type='space', commit_message=commit_msg)
+
+          for folder in ['app', 'ingestion', 'retrieval', 'eval']:
+              api.upload_folder(folder_path=folder, path_in_repo=folder, repo_id=repo_id, repo_type='space', commit_message=commit_msg)
+          "

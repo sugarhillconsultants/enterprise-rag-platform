@@ -3,9 +3,5 @@ uvicorn>=0.30.0
 pydantic>=2.9.0
 numpy>=1.26.0
 scikit-learn>=1.4.0
-
-# Production-only extras (NOT installed in this project's own CI —
-# see docs/architecture.md for why). Uncomment once deploying somewhere
-# with network access, and set USE_REAL_MODELS=true:
-# sentence-transformers>=3.0.0
-# faiss-cpu>=1.8.0
+sentence-transformers>=3.0.0
+faiss-cpu>=1.8.0

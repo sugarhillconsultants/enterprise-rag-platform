@@ -3,10 +3,11 @@ app/main.py
 
 FastAPI service exposing the RAG pipeline: ingest documents, query with
 hybrid retrieval + reranking, and an eval endpoint reporting retrieval
-metrics against a stored ground-truth set. Deliberately uses the
-TF-IDF/mock backends by default (verified, runnable without network),
-with a documented switch to the real embedding/reranking models via
-environment variable once deployed somewhere with network access.
+metrics against a stored ground-truth set. Set USE_REAL_MODELS=true to
+use genuine semantic embeddings (sentence-transformers) and a real
+cross-encoder reranker; defaults to the verified TF-IDF/mock stand-ins
+otherwise. See docs/architecture.md for the full honest breakdown of
+what's verified locally versus what needs network access to confirm.
 """
 
 import os
@@ -18,23 +19,27 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from ingestion.chunker import chunk_document
-from ingestion.embeddings import TfidfEmbedder
+from ingestion.embeddings import TfidfEmbedder, SentenceTransformerEmbedder
 from retrieval.bm25 import BM25
-from retrieval.vector_store import NumpyVectorStore
+from retrieval.vector_store import NumpyVectorStore, FaissVectorStore
 from retrieval.hybrid import hybrid_search
-from retrieval.reranker import MockReranker
+from retrieval.reranker import MockReranker, CrossEncoderReranker
 from eval.metrics import evaluate_retrieval
 
 USE_REAL_MODELS = os.environ.get("USE_REAL_MODELS", "false").lower() == "true"
+EMBEDDING_DIM = 384  # all-MiniLM-L6-v2's output dimension, only used when USE_REAL_MODELS=true
 
 # In-memory index — a real deployment would persist this; kept simple
 # and explicit here since the point of this service is demonstrating
 # the retrieval pipeline, not building a full document-management system.
 _documents: dict[str, str] = {}   # chunk_id -> text
-_embedder: TfidfEmbedder | None = None
-_vector_store: NumpyVectorStore | None = None
+_embedder = None
+_vector_store = None
 _bm25: BM25 | None = None
-_reranker = MockReranker()
+
+# Reranker is stateless (no corpus-specific fitting needed), so it can
+# be constructed once at import time rather than rebuilt per-ingest.
+_reranker = CrossEncoderReranker() if USE_REAL_MODELS else MockReranker()
 
 
 def _rebuild_indexes():
@@ -46,8 +51,14 @@ def _rebuild_indexes():
     chunk_ids = list(_documents.keys())
     texts = list(_documents.values())
 
-    _embedder = TfidfEmbedder().fit(texts)
-    vectors = _embedder.embed(texts)
+    if USE_REAL_MODELS:
+        _embedder = SentenceTransformerEmbedder()
+        vectors = _embedder.embed(texts)
+        _vector_store = FaissVectorStore(dim=EMBEDDING_DIM)
+    else:
+        _embedder = TfidfEmbedder().fit(texts)
+        vectors = _embedder.embed(texts)
+        _vector_store = NumpyVectorStore()
     _vector_store = NumpyVectorStore()
     _vector_store.add(vectors, ids=chunk_ids)
     _bm25 = BM25().fit(texts)
