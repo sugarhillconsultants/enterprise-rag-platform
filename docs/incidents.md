@@ -69,15 +69,62 @@ characters per token, silently filtering out every single-letter
 embedder itself is correct; the test's fixture data was unrealistic.
 Fixed by using real multi-character words instead.
 
-## What's still honestly unverified
+## 5. The real semantic embedding model, confirmed working live — genuine proof, not assumed
 
-Every finding above came from code that actually runs in this
-project's development environment — pure Python, numpy, and scikit-learn,
-no network required. `SentenceTransformerEmbedder` and
-`CrossEncoderReranker` (the real production embedding and reranking
-models) have **not** been executed here at all — no network access to
-download model weights. The code is written correctly against each
-library's documented API, but per this portfolio's own standard,
-"the code looks right" is not the same claim as "this has been run and
-confirmed working." See `docs/architecture.md` for exactly what's
-needed to close that gap.
+Deployed to a Hugging Face Space with `USE_REAL_MODELS=true`, giving
+`SentenceTransformerEmbedder` and `CrossEncoderReranker` their first
+real execution anywhere in this project's history (no network access
+existed in development). The specific test this incident log promised
+in finding #3: query "how often should credentials be refreshed"
+against an ingested document reading "Rotate IAM access keys every 90
+days to reduce credential compromise risk" — **sharing essentially no
+exact vocabulary** ("refreshed" vs. "rotate," "credentials" vs.
+"credential"). The real model correctly ranked this document first
+anyway, which is exactly the semantic-understanding capability the
+TF-IDF stand-in was documented as unable to provide. This is concrete,
+live confirmation — not an assumption — that the production embedding
+path genuinely works and genuinely adds the capability it was built
+to add.
+
+## 6. Two real findings surfaced by the live Space itself, within hours of first deploy
+
+**No persistence — the in-memory document index doesn't survive a
+Space restart.** A document ingested early in testing
+(`cloudtrail-policy`) was confirmed gone from a later query, while a
+different document (`iam-policy`, ingested afterward) was still
+present. Since `_documents` is a plain in-memory Python dict with no
+backing store, any container restart/sleep cycle (Hugging Face Spaces
+can sleep on inactivity) wipes it entirely. This is architecturally
+identical to [Log Anomaly Detection Platform](https://github.com/sugarhillconsultants/log-anomaly-platform)'s
+incident #11 (SQLite-on-container-disk not surviving a redeploy) — same
+root cause category, different storage mechanism, found the same
+way: by actually querying a live deployment and noticing expected data
+was missing, not by code review.
+
+**No authentication on `/ingest` — and live evidence someone actually
+used that gap.** A document reading (in Indonesian) "Artificial
+intelligence is a branch of computer science focused on building
+systems capable of performing tasks that typically require human
+intelligence" appeared in the index without ever having been sent by
+this project's own testing. Since `/ingest` has no auth check at all
+(unlike every protected endpoint in
+[Log Anomaly Detection Platform](https://github.com/sugarhillconsultants/log-anomaly-platform)),
+the only explanation is that a third party — another visitor, an
+automated Spaces crawler, a bot — independently discovered and posted
+to this project's public, unauthenticated endpoint. This isn't a
+hypothetical risk description; it's a live demonstration of the exact
+gap this project's own README already flagged as missing, now with
+concrete evidence of real, unsolicited external use.
+
+## What's confirmed, and what's still genuinely open
+
+Every finding in incidents #1-4 came from code that runs without
+network access — pure Python, numpy, scikit-learn. Incident #5
+confirms the real embedding/reranking path (`sentence-transformers`,
+`faiss-cpu`, a cross-encoder) genuinely works, deployed and tested live
+— this is no longer an open gap. What remains, per incident #6: this
+service needs a persistence layer (matching the fix already identified
+for Log Anomaly Detection Platform) and JWT authentication on `/ingest`
+at minimum (matching the pattern already proven in that same project)
+before it should be considered production-shaped rather than a working
+demonstration of the retrieval pipeline itself.
