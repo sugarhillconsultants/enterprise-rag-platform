@@ -8,6 +8,21 @@ use genuine semantic embeddings (sentence-transformers) and a real
 cross-encoder reranker; defaults to the verified TF-IDF/mock stand-ins
 otherwise. See docs/architecture.md for the full honest breakdown of
 what's verified locally versus what needs network access to confirm.
+
+Per-document visibility classification (U/S/TS) added to support real
+integration with the Multi-Agent Security Operations Platform's Threat
+Intel Agent — see that project's docs/incidents.md for the full
+reasoning. Deliberately scoped: this service LABELS each ingested
+document and returns that label on every retrieved chunk, but does NOT
+itself enforce clearance-based filtering — this service has no
+per-user authorization concept at all (a single hardcoded demo user),
+and building one would be a substantial, separate feature addition.
+Enforcement is the calling system's responsibility, exactly mirroring
+how Project 6 (Secure Data Fusion Platform)'s Fusion Agent integration
+already works: the source system returns labeled data, and the
+Multi-Agent Security Platform's own authorization layer
+(agents/authorization.py there) decides what a given session is
+actually cleared to use.
 """
 
 import os
@@ -35,6 +50,7 @@ EMBEDDING_DIM = 384  # all-MiniLM-L6-v2's output dimension, only used when USE_R
 # and explicit here since the point of this service is demonstrating
 # the retrieval pipeline, not building a full document-management system.
 _documents: dict[str, str] = {}   # chunk_id -> text
+_document_visibility: dict[str, str] = {}   # chunk_id -> visibility label (e.g. "U", "S", "TS")
 _embedder = None
 _vector_store = None
 _bm25: BM25 | None = None
@@ -77,6 +93,7 @@ app = FastAPI(title="Enterprise RAG Platform — Security Knowledge Base", lifes
 class IngestRequest(BaseModel):
     source_id: str
     text: str
+    visibility: str = "U"
 
 
 class IngestResponse(BaseModel):
@@ -94,6 +111,7 @@ class RetrievedChunk(BaseModel):
     chunk_id: str
     text: str
     score: float
+    visibility: str
 
 
 class QueryResponse(BaseModel):
@@ -131,6 +149,7 @@ def ingest(payload: IngestRequest, current_user: str = Depends(get_current_user)
     for chunk in chunks:
         chunk_id = f"{chunk.source_id}::{chunk.chunk_index}"
         _documents[chunk_id] = chunk.text
+        _document_visibility[chunk_id] = payload.visibility
 
     _rebuild_indexes()
     return IngestResponse(source_id=payload.source_id, chunks_created=len(chunks))
@@ -160,7 +179,15 @@ def _do_query(payload: QueryRequest) -> QueryResponse:
 
     return QueryResponse(
         query=payload.query,
-        results=[RetrievedChunk(chunk_id=r.doc_id, text=r.text, score=r.score) for r in reranked],
+        results=[
+            RetrievedChunk(
+                chunk_id=r.doc_id,
+                text=r.text,
+                score=r.score,
+                visibility=_document_visibility.get(r.doc_id, "U"),
+            )
+            for r in reranked
+        ],
         backend="tfidf+mock" if not USE_REAL_MODELS else "sentence-transformers+cross-encoder",
     )
 
